@@ -48,7 +48,7 @@ export async function updateMuscleTargets(_prev: unknown, formData: FormData) {
   return { ok: true, message: "주간 목표 세트를 저장했습니다." };
 }
 
-const CARD_KEYS = ["summary", "today", "muscles", "prs", "trend", "recent", "goals"] as const;
+const CARD_KEYS = ["summary", "coach", "today", "muscles", "prs", "trend", "recent", "goals"] as const;
 
 export async function updateDashboardOrder(order: string[]) {
   const valid = order.filter((k): k is (typeof CARD_KEYS)[number] => (CARD_KEYS as readonly string[]).includes(k));

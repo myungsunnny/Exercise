@@ -30,9 +30,16 @@ export default async function WorkoutPage() {
                 <Play className="size-5" /> 빈 운동으로 시작
               </button>
             </form>
-            <button disabled className={cn(buttonVariants({ variant: "outline" }), "h-12 w-full")} title="Phase 3에서 구현 예정">
-              <Bot className="size-5" /> AI 추천 운동으로 시작 (준비 중)
-            </button>
+            <form action={startWorkout}>
+              <input type="hidden" name="mode" value="recommended" />
+              <button disabled={routines.length === 0} className={cn(buttonVariants({ variant: "outline" }), "h-12 w-full")}>
+                <Bot className="size-5" /> 추천 운동으로 시작
+              </button>
+            </form>
+            <p className="text-xs text-muted-foreground">
+              {routines.length === 0 ? "루틴이 있어야 추천할 수 있습니다." : "오늘 예정된 루틴(없으면 가장 오래 쉰 루틴)에 지난 기록 기반 추천 중량을 채워 시작합니다. "}
+              <Link href="/coach?tab=plans" className="text-primary hover:underline">추천 내용 보기</Link>
+            </p>
           </CardContent>
         </Card>
 

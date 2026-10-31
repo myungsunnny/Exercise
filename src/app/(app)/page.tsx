@@ -13,6 +13,13 @@ import { dateKey, expandPlan } from "@/lib/schedule";
 import { muscleSets, sessionDurationSec, sessionSummary } from "@/lib/session-stats";
 import { cn } from "@/lib/utils";
 import { startWorkout } from "@/app/actions/workout";
+import { InsightButton } from "@/components/coach/plan-actions";
+import { recommendedRoutine, routineTargets, loadContext } from "@/lib/ai/context";
+import { aiConfigured } from "@/lib/ai/gemini";
+import type { Insight } from "@/lib/ai/coach";
+import { requireUser } from "@/lib/auth";
+import { STATUS_LABEL } from "@/lib/progression";
+import { Bot } from "lucide-react";
 
 export const metadata = { title: "홈" };
 
@@ -30,6 +37,13 @@ export default async function DashboardPage() {
     getSchedules(today, today),
     getGoals(),
   ]);
+  // 오늘의 코칭: 규칙 기반 추천(항상) + 오늘 만든 AI 요약(있을 때)
+  const ctx = await loadContext();
+  const rr = recommendedRoutine(ctx);
+  const recTargets = rr ? routineTargets(ctx, rr.routine, rr.isDeload) : [];
+  const { supabase } = await requireUser();
+  const { data: daily } = await supabase.from("ai_insights").select("content").eq("kind", "daily").eq("period_start", today).maybeSingle();
+  const dailyInsight = daily?.content as Insight | undefined;
   const week = all.filter((s) => s.started_at >= start.toISOString() && s.started_at <= end.toISOString());
 
   const todays = expandPlan(routines, schedules, today, today).get(today) ?? [];
@@ -66,6 +80,53 @@ export default async function DashboardPage() {
           <Stat icon={Timer} label="이번 주 운동 시간" value={formatMinutes(weekly.duration)} />
           <Stat icon={Flame} label="연속 운동 주" value={`${streak}주`} sub="주 1회 이상 운동한 연속 주" />
         </section>
+      ),
+    },
+    {
+      key: "coach",
+      title: "오늘의 AI 코칭",
+      wide: true,
+      node: (
+        <Card>
+          <CardHeader><CardTitle className="flex items-center gap-2"><Bot className="size-4 text-primary" /><Link href="/coach?tab=plans" className="hover:text-primary">오늘의 AI 코칭</Link></CardTitle></CardHeader>
+          <CardContent className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-2 text-sm">
+              {rr ? (
+                <>
+                  <p><span className="font-medium">추천 운동: {rr.routine.name}</span> <span className="text-xs text-muted-foreground">· {rr.reason}</span></p>
+                  <ul className="space-y-1">
+                    {recTargets.slice(0, 4).map((t) => (
+                      <li key={t.item.id} className="flex justify-between gap-2">
+                        <span className="truncate">{t.name} <span className="text-xs text-muted-foreground">{STATUS_LABEL[t.rec.status]}{t.rec.stalled && " · 정체"}</span></span>
+                        <span className="num shrink-0">{t.rec.weight != null ? `${t.rec.weight}kg · ` : ""}{t.rec.repsTarget}회</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {!active && (
+                    <form action={startWorkout}>
+                      <input type="hidden" name="mode" value="recommended" />
+                      <button className={cn(buttonVariants({ variant: "secondary" }), "h-10")}>추천으로 시작</button>
+                    </form>
+                  )}
+                </>
+              ) : (
+                <p className="text-muted-foreground">루틴을 만들면 지난 기록 기반으로 다음 운동 중량을 추천합니다.</p>
+              )}
+            </div>
+            <div className="space-y-2 text-sm">
+              {dailyInsight ? (
+                <>
+                  <p className="font-medium">{dailyInsight.headline}</p>
+                  <p className="text-muted-foreground">{dailyInsight.summary}</p>
+                  {dailyInsight.suggestions[0] && <p>💡 {dailyInsight.suggestions[0]}</p>}
+                </>
+              ) : (
+                <p className="text-muted-foreground">{aiConfigured() ? "오늘의 AI 코칭 요약을 아직 만들지 않았습니다." : "Gemini API 키를 설정하면 AI 코칭 요약을 받을 수 있습니다."}</p>
+              )}
+              <InsightButton kind="daily" label={dailyInsight ? "요약 다시 만들기" : "AI 요약 만들기"} disabled={!aiConfigured()} />
+            </div>
+          </CardContent>
+        </Card>
       ),
     },
     {
@@ -255,7 +316,7 @@ export default async function DashboardPage() {
         )}
       </div>
       <DashboardGrid cards={cards} saved={prefs.dashboard_order} />
-      <p className="text-xs text-muted-foreground">AI 코칭 요약·운동 추천은 Phase 3, 체중 변화는 Phase 4에서 추가됩니다.</p>
+      <p className="text-xs text-muted-foreground">체중 변화 카드는 Phase 4(신체 변화 관리)에서 추가됩니다.</p>
     </div>
   );
 }

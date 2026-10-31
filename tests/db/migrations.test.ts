@@ -228,3 +228,28 @@ describe("phase 2", () => {
     expect(r.rows[0].dashboard_order).toEqual(["recent", "summary"]);
   });
 });
+
+describe("phase 3", () => {
+  it("AI tables are private and approval can be claimed only once", async () => {
+    const conv = await as(A, async (tx) => (await tx.query<{ id: string }>(`insert into public.ai_conversations (user_id, title) values ($1, 't') returning id`, [A])).rows[0].id);
+    await as(A, (tx) => tx.query(`insert into public.ai_messages (conversation_id, user_id, role, content) values ($1, $2, 'user', 'hi')`, [conv, A]));
+    expect(await count(B, "ai_messages")).toBe(0);
+    await expect(as(B, (tx) => tx.query(`insert into public.ai_messages (conversation_id, user_id, role, content) values ($1, $2, 'user', 'x')`, [conv, B]))).rejects.toThrow();
+
+    const rec = await as(A, async (tx) => (await tx.query<{ id: string }>(`insert into public.ai_recommendations (user_id, kind, title, payload) values ($1, 'routine_new', 'r', '{}') returning id`, [A])).rows[0].id);
+    const routinesBefore = await count(A, "routines");
+    const claim = () => as(A, async (tx) => (await tx.query(`update public.ai_recommendations set status = 'approved' where id = $1 and status = 'pending' returning id`, [rec])).rows.length);
+    expect(await claim()).toBe(1);
+    expect(await claim()).toBe(0);
+    expect(await count(A, "routines")).toBe(routinesBefore); // 제안 저장만으로는 루틴이 바뀌지 않음
+    expect(await count(B, "ai_recommendations")).toBe(0);
+  });
+
+  it("workout feedback must belong to the user's own session", async () => {
+    const s = { ...sampleSession(), status: "completed" as const, ended_at: "2026-10-30T11:00:00+09:00" };
+    await save(A, s, 1);
+    await as(A, (tx) => tx.query(`insert into public.workout_feedback (session_id, user_id, fatigue, pain) values ($1, $2, 3, false)`, [s.id, A]));
+    await expect(as(B, (tx) => tx.query(`insert into public.workout_feedback (session_id, user_id, fatigue) values ($1, $2, 3)`, [s.id, B]))).rejects.toThrow();
+    expect(await count(B, "workout_feedback")).toBe(0);
+  });
+});

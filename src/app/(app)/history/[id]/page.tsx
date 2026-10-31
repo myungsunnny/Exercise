@@ -6,6 +6,9 @@ import { PageHeader } from "@/components/common/empty-state";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getPreferences, getSession } from "@/lib/data";
+import { requireUser } from "@/lib/auth";
+import { FeedbackForm } from "@/components/workout/feedback-form";
+import { CardHeader, CardTitle } from "@/components/ui/card";
 import { formatClock, formatDate, formatKg, formatMinutes } from "@/lib/format";
 import { SET_TYPE_LABEL } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -15,7 +18,12 @@ import { setVolume, summarize } from "@/lib/workout/stats";
 export default async function SessionDetailPage({ params }: PageProps<"/history/[id]">) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const [res, prefs] = await Promise.all([getSession(id), getPreferences()]);
+  const { supabase } = await requireUser();
+  const [res, prefs, { data: feedback }] = await Promise.all([
+    getSession(id),
+    getPreferences(),
+    supabase.from("workout_feedback").select("fatigue, energy, pain, notes").eq("session_id", id).maybeSingle(),
+  ]);
   if (!res) notFound();
   const { draft } = res;
   if (draft.status === "in_progress") redirect("/workout");
@@ -88,6 +96,10 @@ export default async function SessionDetailPage({ params }: PageProps<"/history/
         ))}
       </div>
       {draft.notes && <p className="mt-4 rounded-lg bg-muted p-3 text-sm whitespace-pre-wrap">{draft.notes}</p>}
+      <Card className="mt-4">
+        <CardHeader><CardTitle>운동 후 컨디션</CardTitle></CardHeader>
+        <CardContent><FeedbackForm sessionId={draft.id} initial={feedback} /></CardContent>
+      </Card>
       <p className="mt-4 text-xs text-muted-foreground">운동량 = 완료한 본세트의 중량 × 횟수 합계 (워밍업·맨몸·유산소 제외). 취소선은 완료하지 않은 세트입니다.</p>
     </>
   );

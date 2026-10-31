@@ -12,6 +12,8 @@ export type ASet = {
   duration_seconds: number | null;
   distance_km: number | null;
   is_completed: boolean;
+  rpe?: number | null;
+  rir?: number | null;
 };
 export type AExercise = {
   exercise_id: string;

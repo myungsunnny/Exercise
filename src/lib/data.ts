@@ -172,7 +172,7 @@ export async function listCompletedSessions(opts: { from?: Date; to?: Date; limi
     .select(
       `id, title, started_at, ended_at, paused_seconds, routine_id,
        workout_exercises(id, exercise_name, exercise_id, position, exercises(exercise_type, exercise_muscles(muscle_id, role)),
-         workout_sets(set_type, weight_kg, reps, duration_seconds, distance_km, is_completed))`,
+         workout_sets(set_type, weight_kg, reps, duration_seconds, distance_km, is_completed, rpe, rir, position))`,
     )
     .eq("status", "completed")
     .order("started_at", { ascending: false });
@@ -191,8 +191,9 @@ export async function listCompletedSessions(opts: { from?: Date; to?: Date; limi
           ...e,
           exercise_type: ex?.exercise_type ?? ("weight_reps" as ExerciseType),
           muscles: ex?.exercise_muscles ?? [],
-          workout_sets: e.workout_sets.map((x) => ({
+          workout_sets: [...e.workout_sets].sort((a, b) => a.position - b.position).map((x) => ({
             ...x,
+            rpe: x.rpe == null ? null : Number(x.rpe),
             set_type: x.set_type as SetType,
             weight_kg: x.weight_kg == null ? null : Number(x.weight_kg),
             distance_km: x.distance_km == null ? null : Number(x.distance_km),
@@ -317,4 +318,39 @@ export async function getPrograms(): Promise<Program[]> {
   const { data, error } = await supabase.from("training_programs").select("id, name, start_date, weeks, deload_every, pattern").order("start_date", { ascending: false });
   if (error) throw error;
   return data as Program[];
+}
+
+// ───────────────────────── 코치 프로필·피드백 ─────────────────────────
+export type CoachProfile = {
+  display_name: string | null;
+  experience_level: "beginner" | "intermediate" | "advanced" | null;
+  training_goal: "hypertrophy" | "strength" | "fat_loss" | "general_fitness" | "endurance" | null;
+  available_days: number[];
+  session_minutes: number | null;
+  equipment: string[];
+  constraints_note: string | null;
+  birth_year: number | null;
+  sex: string | null;
+  height_cm: number | null;
+};
+
+export async function getCoachProfile(): Promise<CoachProfile> {
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("display_name, experience_level, training_goal, available_days, session_minutes, equipment, constraints_note, birth_year, sex, height_cm")
+    .maybeSingle();
+  if (error) throw error;
+  return (data as CoachProfile | null) ?? { display_name: null, experience_level: null, training_goal: null, available_days: [], session_minutes: null, equipment: [], constraints_note: null, birth_year: null, sex: null, height_cm: null };
+}
+
+export async function getRecentFeedback(limit = 10) {
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase
+    .from("workout_feedback")
+    .select("session_id, fatigue, energy, pain, notes, created_at, workout_sessions(title, started_at)")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data as unknown as { session_id: string; fatigue: number | null; energy: number | null; pain: boolean; notes: string | null; created_at: string; workout_sessions: { title: string; started_at: string } | null }[];
 }

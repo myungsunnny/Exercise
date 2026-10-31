@@ -6,6 +6,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { getActiveSession, getPreviousSets, getRoutine, getSession } from "@/lib/data";
 import { workoutPayloadSchema } from "@/lib/workout/schema";
+import { loadContext, recommendedRoutine, routineTargets } from "@/lib/ai/context";
 import { newExercise, newSession, newSet, toPayload, type DraftSession } from "@/lib/workout/model";
 
 export type SaveResult = { ok: true; revision: number } | { ok: false; error: string };
@@ -30,6 +31,7 @@ const startSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("empty") }),
   z.object({ mode: z.literal("routine"), routineId: z.uuid() }),
   z.object({ mode: z.literal("copy"), sessionId: z.uuid() }),
+  z.object({ mode: z.literal("recommended") }),
 ]);
 
 export async function startWorkout(formData: FormData) {
@@ -57,6 +59,28 @@ export async function startWorkout(formData: FormData) {
             sets: Array.from({ length: it.target_sets }, () =>
               newSet({ weight: it.target_weight_kg == null ? "" : String(it.target_weight_kg) }),
             ),
+          },
+        ),
+      ),
+    });
+  } else if (input.mode === "recommended") {
+    // 규칙 기반 추천 중량을 미리 채운 루틴으로 시작
+    const ctx = await loadContext();
+    const rr = recommendedRoutine(ctx);
+    if (!rr) throw new Error("추천할 루틴이 없습니다.");
+    draft = newSession(now, {
+      title: `${rr.routine.name} (추천)`,
+      routine_id: rr.routine.id,
+      exercises: routineTargets(ctx, rr.routine, rr.isDeload).map(({ item, rec }) =>
+        newExercise(
+          { id: item.exercise_id, name_ko: item.exercises?.name_ko ?? "운동", exercise_type: item.exercises?.exercise_type ?? "weight_reps" },
+          {
+            superset_group: item.superset_group,
+            rest_seconds: item.rest_seconds,
+            rep_min: item.rep_min,
+            rep_max: item.rep_max,
+            notes: rec.reason,
+            sets: Array.from({ length: rec.sets }, () => newSet({ weight: rec.weight == null ? "" : String(rec.weight) })),
           },
         ),
       ),
