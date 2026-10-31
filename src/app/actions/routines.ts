@@ -9,7 +9,7 @@ import { ROUTINE_TEMPLATES } from "@/lib/routine-templates";
 
 const intOrNull = (min: number, max: number) => z.number().int().min(min).max(max).nullable();
 
-export const routineSchema = z.object({
+const routineSchema = z.object({
   id: z.uuid().nullable(),
   name: z.string().trim().min(1, "루틴 이름을 입력하세요.").max(80),
   description: z.string().max(1000).nullable(),
