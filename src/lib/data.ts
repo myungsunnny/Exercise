@@ -10,7 +10,7 @@ export async function getPreferences(): Promise<Preferences> {
   const { supabase } = await requireUser();
   const { data } = await supabase
     .from("user_preferences")
-    .select("timezone, weight_unit, default_rest_seconds, weight_increment_kg, weekly_workout_target")
+    .select("timezone, weight_unit, default_rest_seconds, weight_increment_kg, weekly_workout_target, dashboard_order, muscle_set_targets")
     .maybeSingle();
   return data ? { ...data, weight_increment_kg: Number(data.weight_increment_kg) } : DEFAULT_PREFERENCES;
 }
@@ -270,4 +270,51 @@ export async function getRoutineUsage() {
     usage.set(r.routine_id!, u);
   }
   return usage;
+}
+
+// ───────────────────────── 목표·일정 ─────────────────────────
+export type Goal = {
+  id: string;
+  kind: "weekly_count" | "weekly_minutes" | "exercise_weight" | "exercise_reps" | "body_weight" | "streak_weeks";
+  exercise_id: string | null;
+  target_value: number;
+  start_value: number | null;
+  deadline: string | null;
+  achieved_at: string | null;
+  created_at: string;
+  exercises: { name_ko: string } | null;
+};
+
+export async function getGoals(): Promise<Goal[]> {
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase
+    .from("user_goals")
+    .select("id, kind, exercise_id, target_value, start_value, deadline, achieved_at, created_at, exercises(name_ko)")
+    .is("archived_at", null)
+    .order("created_at");
+  if (error) throw error;
+  return (data as unknown as Goal[]).map((g) => ({ ...g, target_value: Number(g.target_value), start_value: g.start_value == null ? null : Number(g.start_value) }));
+}
+
+export type Schedule = { id: string; program_id: string | null; routine_id: string | null; scheduled_date: string; status: "planned" | "skipped"; is_deload: boolean; notes: string | null };
+
+export async function getSchedules(fromDate: string, toDate: string): Promise<Schedule[]> {
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase
+    .from("program_schedules")
+    .select("id, program_id, routine_id, scheduled_date, status, is_deload, notes")
+    .gte("scheduled_date", fromDate)
+    .lte("scheduled_date", toDate)
+    .order("scheduled_date");
+  if (error) throw error;
+  return data as Schedule[];
+}
+
+export type Program = { id: string; name: string; start_date: string; weeks: number; deload_every: number | null; pattern: { weekday: number; routine_id: string }[] };
+
+export async function getPrograms(): Promise<Program[]> {
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase.from("training_programs").select("id, name, start_date, weeks, deload_every, pattern").order("start_date", { ascending: false });
+  if (error) throw error;
+  return data as Program[];
 }

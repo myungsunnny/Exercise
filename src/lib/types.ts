@@ -37,7 +37,11 @@ export type Preferences = {
   default_rest_seconds: number;
   weight_increment_kg: number;
   weekly_workout_target: number;
+  dashboard_order: string[];
+  muscle_set_targets: Record<string, number>;
 };
+
+export const DEFAULT_MUSCLE_SET_TARGET = 10; // 주간 목표 세트 기본값(근비대 일반 권장 범위 10~20의 하한)
 
 export const DEFAULT_PREFERENCES: Preferences = {
   timezone: "Asia/Seoul",
@@ -45,6 +49,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   default_rest_seconds: 90,
   weight_increment_kg: 2.5,
   weekly_workout_target: 3,
+  dashboard_order: [],
+  muscle_set_targets: {},
 };
 
 export const EXERCISE_TYPE_LABEL: Record<ExerciseType, string> = {

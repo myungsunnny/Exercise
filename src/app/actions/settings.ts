@@ -31,3 +31,31 @@ export async function signOut() {
   await supabase.auth.signOut();
   redirect("/login");
 }
+
+const MUSCLE_IDS = ["chest", "back", "shoulders", "biceps", "triceps", "forearms", "abs", "glutes", "quads", "hamstrings", "calves"] as const;
+
+export async function updateMuscleTargets(_prev: unknown, formData: FormData) {
+  const targets: Record<string, number> = {};
+  for (const id of MUSCLE_IDS) {
+    const n = Number(formData.get(id));
+    if (!Number.isInteger(n) || n < 0 || n > 40) return { ok: false, message: "목표 세트는 0~40 사이 정수여야 합니다." };
+    targets[id] = n;
+  }
+  const { supabase, userId } = await requireUser();
+  const { error } = await supabase.from("user_preferences").update({ muscle_set_targets: targets }).eq("user_id", userId);
+  if (error) return { ok: false, message: "저장하지 못했습니다." };
+  revalidatePath("/muscles");
+  return { ok: true, message: "주간 목표 세트를 저장했습니다." };
+}
+
+const CARD_KEYS = ["summary", "today", "muscles", "prs", "trend", "recent", "goals"] as const;
+
+export async function updateDashboardOrder(order: string[]) {
+  const valid = order.filter((k): k is (typeof CARD_KEYS)[number] => (CARD_KEYS as readonly string[]).includes(k));
+  if (valid.length !== new Set(valid).size) return { ok: false };
+  const { supabase, userId } = await requireUser();
+  const { error } = await supabase.from("user_preferences").update({ dashboard_order: valid }).eq("user_id", userId);
+  if (error) return { ok: false };
+  revalidatePath("/");
+  return { ok: true };
+}

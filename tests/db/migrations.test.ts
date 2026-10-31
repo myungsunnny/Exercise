@@ -198,3 +198,33 @@ describe("RLS", () => {
     expect(await count(A, "routine_exercises", `routine_id = '${id}'`)).toBe(1);
   });
 });
+
+describe("phase 2", () => {
+  it("create_program inserts program and schedules atomically, private to the owner", async () => {
+    const routineId = (await as(A, (tx) => tx.query<{ id: string }>(`select id from public.routines limit 1`))).rows[0].id;
+    const pid = await as(A, async (tx) =>
+      (await tx.query<{ id: string }>(`select public.create_program($1::jsonb, $2::jsonb) as id`, [
+        JSON.stringify({ name: "8주", start_date: "2026-11-02", weeks: 8, deload_every: 4, pattern: [{ weekday: 1, routine_id: routineId }] }),
+        JSON.stringify([{ date: "2026-11-02", routine_id: routineId, is_deload: false }, { date: "2026-11-23", routine_id: routineId, is_deload: true }]),
+      ])).rows[0].id,
+    );
+    expect(await count(A, "program_schedules", `program_id = '${pid}'`)).toBe(2);
+    expect(await count(B, "program_schedules")).toBe(0);
+    expect(await count(B, "training_programs")).toBe(0);
+    await as(A, (tx) => tx.query(`delete from public.training_programs where id = $1`, [pid]));
+    expect(await count(A, "program_schedules", `program_id = '${pid}'`)).toBe(0);
+  });
+
+  it("goals require an exercise for exercise goals and are private", async () => {
+    await expect(as(A, (tx) => tx.query(`insert into public.user_goals (user_id, kind, target_value) values ($1, 'exercise_weight', 100)`, [A]))).rejects.toThrow();
+    await as(A, (tx) => tx.query(`insert into public.user_goals (user_id, kind, target_value) values ($1, 'weekly_count', 4)`, [A]));
+    expect(await count(A, "user_goals")).toBe(1);
+    expect(await count(B, "user_goals")).toBe(0);
+  });
+
+  it("preferences store dashboard order and muscle targets", async () => {
+    await as(A, (tx) => tx.query(`update public.user_preferences set dashboard_order = '{recent,summary}', muscle_set_targets = '{"chest":12}' where user_id = $1`, [A]));
+    const r = await as(A, (tx) => tx.query<{ dashboard_order: string[] }>(`select dashboard_order from public.user_preferences`));
+    expect(r.rows[0].dashboard_order).toEqual(["recent", "summary"]);
+  });
+});

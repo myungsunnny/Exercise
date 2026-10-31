@@ -11,7 +11,7 @@
 |---|---|---|---|
 | 인증 | 이메일/비밀번호 로그인, 가입 화면 없음(Supabase에서 가입 비활성화), 세션 갱신 proxy | 1 | ✅ |
 | 홈 | 오늘 날짜·예정 루틴·운동 시작, 이번 주 횟수/목표 달성률/운동량/시간, 연속 운동 주, 근육별 주간 세트, 최근 운동, 빈 상태 안내 | 1 | ✅ |
-| 홈 | 최근 PR, 주요 종목 중량 추이, 카드 순서 변경 | 2 | 🔜 |
+| 홈 | 최근 PR, 주요 종목 중량 추이, 목표 진행률, 카드 순서 변경 | 2 | ✅ |
 | 홈 | AI 추천·코칭 요약 / 체중 변화 | 3 / 4 | ⏳ |
 | 운동 기록 | 빈 운동·루틴·지난 운동 복사로 시작, 시작 시각 자동 기록, 경과 시간, 일시정지/재개 | 1 | ✅ |
 | 운동 기록 | 세트 유형(W/본/D/F), 중량·횟수·시간·거리, RPE·RIR, 완료 여부/시각, 세트 간 휴식 시간, 세트·종목 메모 | 1 | ✅ |
@@ -22,14 +22,15 @@
 | 히스토리 | 월별 목록, 상세(세트·운동량), 수정(같은 편집기), 삭제, 다시 하기 | 1 | ✅ |
 | 루틴 | 직접 제작·수정·삭제·복사, 종목 순서, 세트 수·반복 범위·목표 중량·휴식, 슈퍼세트, 요일 배치, 예상 시간, 사용 횟수·최근 수행 | 1 | ✅ |
 | 루틴 | 기본 템플릿 10종(초보자, 전신, 2·3·4·5분할, PPL, 상/하체, 근비대, 근력) | 1 | ✅ |
-| 루틴 | 4·8·12주 장기 프로그램 | 2·5 | 🔜 |
+| 루틴 | 4~16주 장기 프로그램(요일 패턴, 디로드 주기, 진행률) | 2 | ✅ |
 | 라이브러리 | 기본 64종, 부위·기구·난이도·유형·즐겨찾기 필터, 상세(자세·주의·대체 운동), 종목별 휴식 시간, 직접 추가/삭제(기록에 쓰였으면 보관) | 1 | ✅ |
-| 계획·캘린더 | 주간·월간 계획, 월/주/일 캘린더, 일정 이동·반복 | 2 | 🔜 |
-| 통계 | 기간별 운동량·빈도·세트·반복, 종목별 중량 추이·최고 기록·추정 1RM, 기간 비교 | 2 | 🔜 |
-| 근육 분석 | 근육도, 근육별 주간 세트·최근 훈련일·목표 세트, 추정 회복 참고 | 2 | 🔜 |
-| 목표·성취 | 주간 횟수/시간, 종목 목표, 체중 목표, 배지(과훈련 유도 없음) | 2 | 🔜 |
+| 계획·캘린더 | 주간 루틴 배치, 월/주/일 캘린더(완료·예정·미수행·휴식), 일정 추가·이동·건너뛰기, 매주 반복 | 2 | ✅ |
+| 통계 | 기간별(일/주/월/년) 운동량·빈도·시간·세트·반복, 근육별 세트, 종목별 중량 추이·최고 기록·추정 1RM, PR 경신 내역, 목표 달성률·루틴 수행률, 두 기간 비교 | 2 | ✅ |
+| 근육 분석 | 근육도(앞/뒤), 근육별 주간 세트·지난주 대비·4주 빈도·최근 훈련일·주간 목표 세트, 회복 참고(추정) | 2 | ✅ |
+| 목표·성취 | 주간 횟수/시간, 종목 중량·반복, 연속 주, 체중(신체 기록 연결 시), 배지(과훈련 유도 없음) | 2 | ✅ |
 | 설정 | 이름, 주간 목표, 기본 휴식, 중량 증가 단위, 다크/라이트 | 1 | ✅ |
-| 설정 | CSV 내보내기 / JSON 백업·복원·삭제 | 2 / 5 | 🔜 |
+| 설정 | CSV 내보내기 | 2 | ✅ |
+| 설정 | JSON 백업·복원·삭제 | 5 | ⏳ |
 | AI 트레이너 | 기록 기반 대화, 계획 생성·승인 적용, 교체 추천, 리포트 | 3 | ⏳ |
 | 점진적 과부하 | 규칙 기반 중량·횟수 추천, 정체 감지, 디로드 | 3·5 | ⏳ |
 | 신체·영양·수면 | 측정·사진(비공개 저장소), 식단·영양, 수면·컨디션 | 4 | ⏳ |
@@ -121,14 +122,17 @@ erDiagram
 - **멱등 자동저장**: 클라이언트 UUID + `save_workout(p_session, p_revision)` RPC가 한 트랜잭션에서 upsert/삭제. `client_revision`보다 낮은 요청은 무시(늦게 도착한 요청이 최신 값을 덮지 않음).
 - **권한**: anon은 모든 테이블 접근 불가, authenticated만 RLS를 거쳐 접근. RPC는 `security invoker`.
 
+### Phase 2 추가 (`20261101000001_phase2_planning.sql`)
+- `user_goals`: kind(weekly_count/weekly_minutes/exercise_weight/exercise_reps/body_weight/streak_weeks), target_value, exercise_id(운동 목표일 때 필수, CHECK), deadline
+- `training_programs`: 시작일, 주 수, 디로드 주기, 요일 패턴(jsonb) / `program_schedules`: 날짜별 일정, status(planned/skipped), is_deload
+- `user_preferences.dashboard_order`, `muscle_set_targets`
+- `create_program` RPC(프로그램+일정 원자적 생성)
+- **설계 변경**: `personal_records`, `goal_progress`, `achievements`, `program_weeks` 테이블은 만들지 않았다. PR·목표 진행률·배지는 원본 세트에서 매번 계산해 수정·삭제가 즉시 반영되고, 주차 정보는 프로그램 시작일과 패턴에서 계산된다.
+
 ### 이후 단계 테이블(미생성, 단계별 마이그레이션으로 추가)
 
 | Phase | 테이블 | 핵심 컬럼 / 비고 |
 |---|---|---|
-| 2 | `personal_records` | user_id, exercise_id, kind(1rm_est/max_weight/max_reps/max_volume), value, workout_set_id(FK cascade), achieved_at — 세트 변경 시 재계산 |
-| 2 | `user_goals`, `goal_progress` | kind(weekly_count/weekly_minutes/exercise_weight/exercise_reps/body_weight/habit), target, period, exercise_id? |
-| 2 | `training_programs`, `program_weeks`, `program_schedules` | 4·8·12주 프로그램, 주차별 루틴, 날짜별 일정(routine_id, scheduled_date, status) |
-| 2 | `achievements`, `user_achievements` | 배지 정의(시드) / 획득 기록 |
 | 2 | `equipment_profiles` | 사용 가능한 기구 목록(AI 계획 반영) |
 | 3 | `ai_conversations`, `ai_messages` | 대화 / role, content, tool_calls(jsonb: 조회한 데이터 범위 기록) |
 | 3 | `ai_recommendations`, `ai_plan_versions` | 제안 payload(jsonb), status(pending/approved/rejected), before/after, applied_at |
