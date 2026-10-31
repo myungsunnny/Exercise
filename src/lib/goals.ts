@@ -33,7 +33,7 @@ export function goalProgress(g: Goal, ctx: { weekSessions: number; weekMinutes: 
       return b == null ? { current: null, pct: 0, achieved: false, note: "맨몸 종목의 한 세트 최다 반복 기준" } : done(b);
     }
     case "body_weight": {
-      if (ctx.bodyWeight == null) return { current: null, pct: 0, achieved: false, note: "신체 기록(체중)이 있어야 계산됩니다" };
+      if (ctx.bodyWeight == null) return { current: null, pct: 0, achieved: false, note: "신체 변화 메뉴에서 체중을 기록하면 계산됩니다" };
       const start = g.start_value ?? ctx.bodyWeight;
       const losing = g.target_value < start;
       const p = start === g.target_value ? 100 : Math.max(0, Math.min(100, Math.round(((start - ctx.bodyWeight) / (start - g.target_value)) * 100)));

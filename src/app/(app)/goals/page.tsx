@@ -2,7 +2,7 @@ import { Award, Lock } from "lucide-react";
 import { PageHeader } from "@/components/common/empty-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { badges, durationSec, personalRecords } from "@/lib/analytics";
-import { getExercises, getGoals, getPreferences, listCompletedSessions } from "@/lib/data";
+import { getExercises, getGoals, getLatestWeight, getPreferences, listCompletedSessions } from "@/lib/data";
 import { formatDate, weekRange, weekStreak } from "@/lib/format";
 import { GOAL_KIND_LABEL, GOAL_UNIT, goalProgress } from "@/lib/goals";
 import { cn } from "@/lib/utils";
@@ -12,13 +12,13 @@ export const metadata = { title: "목표·성취" };
 
 export default async function GoalsPage() {
   const now = new Date();
-  const [goals, sessions, prefs, exercises] = await Promise.all([getGoals(), listCompletedSessions(), getPreferences(), getExercises()]);
+  const [goals, sessions, prefs, exercises, latestWeight] = await Promise.all([getGoals(), listCompletedSessions(), getPreferences(), getExercises(), getLatestWeight()]);
   const tz = prefs.timezone;
   const { start, end } = weekRange(now, tz);
   const week = sessions.filter((s) => s.started_at >= start.toISOString() && s.started_at <= end.toISOString());
   const streak = weekStreak(sessions.map((s) => s.started_at), now, tz);
   const { best, events } = personalRecords(sessions);
-  const ctx = { weekSessions: week.length, weekMinutes: Math.round(week.reduce((a, s) => a + durationSec(s), 0) / 60), streak, best, bodyWeight: null };
+  const ctx = { weekSessions: week.length, weekMinutes: Math.round(week.reduce((a, s) => a + durationSec(s), 0) / 60), streak, best, bodyWeight: latestWeight?.weight ?? null };
   const rows = goals.map((g) => ({ g, p: goalProgress(g, ctx) }));
   const list = badges(sessions, streak, events.length, rows.filter((r) => r.p.achieved).length);
 

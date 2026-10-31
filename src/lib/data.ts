@@ -354,3 +354,86 @@ export async function getRecentFeedback(limit = 10) {
   if (error) throw error;
   return data as unknown as { session_id: string; fatigue: number | null; energy: number | null; pain: boolean; notes: string | null; created_at: string; workout_sessions: { title: string; started_at: string } | null }[];
 }
+
+// ───────────────────────── 신체·영양·수면 ─────────────────────────
+export type BodyRow = {
+  id: string; measured_on: string; weight_kg: number | null; body_fat_pct: number | null; skeletal_muscle_kg: number | null; muscle_kg: number | null;
+  waist_cm: number | null; chest_cm: number | null; arm_cm: number | null; thigh_cm: number | null; custom: Record<string, number>; notes: string | null;
+};
+const BODY_NUM = ["weight_kg", "body_fat_pct", "skeletal_muscle_kg", "muscle_kg", "waist_cm", "chest_cm", "arm_cm", "thigh_cm"] as const;
+
+export async function getBodyMeasurements(fromDate?: string): Promise<BodyRow[]> {
+  const { supabase } = await requireUser();
+  let q = supabase.from("body_measurements").select("id, measured_on, notes, custom, " + BODY_NUM.join(", ")).order("measured_on");
+  if (fromDate) q = q.gte("measured_on", fromDate);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data as unknown as BodyRow[]).map((r) => ({ ...r, ...Object.fromEntries(BODY_NUM.map((k) => [k, r[k] == null ? null : Number(r[k])])) }));
+}
+
+export async function getLatestWeight(): Promise<{ weight: number; date: string } | null> {
+  const { supabase } = await requireUser();
+  const { data } = await supabase.from("body_measurements").select("measured_on, weight_kg").not("weight_kg", "is", null).order("measured_on", { ascending: false }).limit(1).maybeSingle();
+  return data ? { weight: Number(data.weight_kg), date: data.measured_on } : null;
+}
+
+export async function getBodyPhotos() {
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase.from("body_photos").select("id, taken_on, pose, storage_path, notes").order("taken_on", { ascending: false }).limit(200);
+  if (error) throw error;
+  if (!data.length) return [];
+  // 비공개 버킷: 1시간짜리 서명 URL을 서버에서 발급
+  const { data: signed } = await supabase.storage.from("body-photos").createSignedUrls(data.map((p) => p.storage_path), 3600);
+  const url = new Map((signed ?? []).map((s) => [s.path, s.signedUrl]));
+  return data.map((p) => ({ ...p, url: url.get(p.storage_path) ?? null }));
+}
+
+export type Food = { id: string; owner_id: string | null; name: string; serving_desc: string; kcal: number; protein_g: number; carbs_g: number; fat_g: number; source: "seed" | "user" | "label"; is_estimate: boolean; source_note: string | null };
+
+export async function getFoods(): Promise<Food[]> {
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase.from("food_items").select("id, owner_id, name, serving_desc, kcal, protein_g, carbs_g, fat_g, source, is_estimate, source_note").is("archived_at", null).order("name");
+  if (error) throw error;
+  return (data as Food[]).map((f) => ({ ...f, kcal: Number(f.kcal), protein_g: Number(f.protein_g), carbs_g: Number(f.carbs_g), fat_g: Number(f.fat_g) }));
+}
+
+export type MealItem = { id: string; name: string; serving_desc: string | null; servings: number; kcal: number; protein_g: number; carbs_g: number; fat_g: number; is_estimate: boolean; food_item_id: string | null };
+export type Meal = { id: string; eaten_on: string; meal_type: "breakfast" | "lunch" | "dinner" | "snack"; notes: string | null; meal_items: MealItem[] };
+
+export async function getMeals(fromDate: string, toDate: string): Promise<Meal[]> {
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase
+    .from("meals")
+    .select("id, eaten_on, meal_type, notes, meal_items(id, name, serving_desc, servings, kcal, protein_g, carbs_g, fat_g, is_estimate, food_item_id, created_at)")
+    .gte("eaten_on", fromDate).lte("eaten_on", toDate).order("eaten_on");
+  if (error) throw error;
+  return (data as unknown as Meal[]).map((m) => ({
+    ...m,
+    meal_items: m.meal_items.map((i) => ({ ...i, servings: Number(i.servings), kcal: Number(i.kcal), protein_g: Number(i.protein_g), carbs_g: Number(i.carbs_g), fat_g: Number(i.fat_g) })),
+  }));
+}
+
+export type NutritionGoals = { kcal: number | null; protein_g: number | null; carbs_g: number | null; fat_g: number | null; water_ml: number | null };
+export async function getNutritionGoals(): Promise<NutritionGoals> {
+  const { supabase } = await requireUser();
+  const { data } = await supabase.from("nutrition_goals").select("kcal, protein_g, carbs_g, fat_g, water_ml").maybeSingle();
+  return data ?? { kcal: null, protein_g: null, carbs_g: null, fat_g: null, water_ml: null };
+}
+
+export async function getMealTemplates() {
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase.from("meal_templates").select("id, name, items").order("created_at", { ascending: false });
+  if (error) throw error;
+  return data as { id: string; name: string; items: Omit<MealItem, "id">[] }[];
+}
+
+export type Wellness = { id: string; log_date: string; sleep_hours: number | null; sleep_quality: number | null; fatigue: number | null; condition: number | null; resting_hr: number | null; steps: number | null; active_minutes: number | null; water_ml: number | null; notes: string | null };
+export async function getWellness(fromDate: string, toDate: string): Promise<Wellness[]> {
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase
+    .from("daily_wellness_logs")
+    .select("id, log_date, sleep_hours, sleep_quality, fatigue, condition, resting_hr, steps, active_minutes, water_ml, notes")
+    .gte("log_date", fromDate).lte("log_date", toDate).order("log_date");
+  if (error) throw error;
+  return (data as Wellness[]).map((w) => ({ ...w, sleep_hours: w.sleep_hours == null ? null : Number(w.sleep_hours) }));
+}

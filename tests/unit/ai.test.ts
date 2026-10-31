@@ -18,6 +18,7 @@ function ctx(sessions: Ctx["sessions"] = []): Ctx {
     now: new Date("2026-11-01T12:00:00+09:00"), tz: "Asia/Seoul", today: "2026-11-01", prefs: DEFAULT_PREFERENCES,
     profile: { display_name: null, experience_level: null, training_goal: null, available_days: [], session_minutes: null, equipment: [], constraints_note: null, birth_year: null, sex: null, height_cm: null },
     sessions, routines: [], goals: [], settings: new Map(), plan: new Map(),
+    body: [], wellness: [], meals: [], nutritionGoals: { kcal: null, protein_g: null, carbs_g: null, fat_g: null, water_ml: null }, latestWeight: null,
     exercises: [{ id: BENCH, owner_id: null, name_ko: "바벨 벤치프레스", name_en: "Barbell Bench Press", exercise_type: "weight_reps", equipment: "barbell", difficulty: "intermediate", instructions: null, cautions: null, media_url: null, archived_at: null, exercise_muscles: [{ muscle_id: "chest", role: "primary" }] }],
   } as Ctx;
 }
@@ -49,6 +50,18 @@ describe("AI tools never invent records", () => {
   it("returns similar names instead of guessing an unknown exercise", async () => {
     const r = await runTool(ctx(), "get_exercise_progress", { exercise: "없는운동" });
     expect(r.result).toMatchObject({ data_available: false });
+  });
+});
+
+describe("health tools", () => {
+  it("say there is no body/nutrition/wellness data instead of guessing", async () => {
+    for (const t of ["get_body_trend", "get_nutrition_summary", "get_wellness_summary"]) expect((await runTool(ctx(), t, {})).result).toMatchObject({ data_available: false });
+  });
+  it("summarize recorded nutrition per day", async () => {
+    const c = ctx();
+    c.meals = [{ id: "m", eaten_on: "2026-10-31", meal_type: "lunch", notes: null, meal_items: [{ id: "i", name: "쌀밥", serving_desc: "1공기", servings: 1, kcal: 315, protein_g: 5.5, carbs_g: 70, fat_g: 0.6, is_estimate: true, food_item_id: null }] }];
+    const r = await runTool(c, "get_nutrition_summary", {});
+    expect(r.result.daily).toEqual([expect.objectContaining({ date: "2026-10-31", kcal: 315, includes_estimates: true })]);
   });
 });
 

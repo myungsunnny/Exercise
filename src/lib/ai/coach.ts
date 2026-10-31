@@ -6,6 +6,7 @@ import { MUSCLE_NAME } from "@/lib/exercise-filter";
 import { EQUIPMENT_LABEL } from "@/lib/types";
 import { durationSec, muscleStats, personalRecords, PR_LABEL, totals } from "@/lib/analytics";
 import { getMuscles } from "@/lib/data";
+import { sumMacros } from "@/lib/health";
 import { loadContext, recommendedRoutine, routineTargets, type Ctx } from "./context";
 import { AIError, generate, generateJson, type Content, type Schema } from "./gemini";
 import { runTool, TOOL_DECLS } from "./tools";
@@ -108,6 +109,7 @@ async function planContext(ctx: Ctx) {
     `목표: ${p.training_goal ?? "미설정"} / 경력: ${p.experience_level ?? "미설정"} / 운동 가능 요일: ${p.available_days.map((d) => days[d]).join(",") || "미설정"} / 1회 운동 시간: ${p.session_minutes ?? "미설정"}분`,
     `보유 기구: ${p.equipment.map((e) => EQUIPMENT_LABEL[e as keyof typeof EQUIPMENT_LABEL] ?? e).join(", ") || "미설정"} / 제한사항·선호: ${p.constraints_note ?? "없음"}`,
     `최근 4주: ${t.sessions}회, 본세트 ${t.sets}세트, 운동량 ${t.volume}kg` + (four.length ? "" : " (기록 없음)"),
+    `최근 7일 수면·피로: ${ctx.wellness.slice(-7).map((w) => `${w.log_date.slice(5)} 수면${w.sleep_hours ?? "-"}h 피로${w.fatigue ?? "-"}`).join(", ") || "기록 없음"}`,
     `근육별 최근 2주 세트: ${muscleStats(ctx.sessions, muscles.map((m) => m.id), ctx.now, ctx.tz).map((m) => `${MUSCLE_NAME[m.muscleId]} ${m.setsThisWeek + m.setsLastWeek}`).join(", ")}`,
   ].join("\n");
 }
@@ -257,6 +259,8 @@ export async function buildInsight(kind: "daily" | "weekly" | "monthly", periodS
     muscle_sets_this_week: Object.fromEntries(muscleStats(ctx.sessions, muscles.map((m) => m.id), ctx.now, ctx.tz).map((m) => [MUSCLE_NAME[m.muscleId], m.setsThisWeek])),
     next_recommended: rr ? { routine: rr.routine.name, reason: rr.reason, targets: routineTargets(ctx, rr.routine, rr.isDeload).map((x) => `${x.name}: ${x.rec.weight ?? "-"}kg ${x.rec.repsTarget}회 ${x.rec.sets}세트 (${x.rec.reason})`) } : "루틴 없음",
     today_planned: (ctx.plan.get(ctx.today) ?? []).map((p) => ctx.routines.find((r) => r.id === p.routineId)?.name),
+    latest_body_weight_kg: ctx.latestWeight,
+    recent_wellness: ctx.wellness.slice(-7).map((w) => ({ date: w.log_date, sleep_hours: w.sleep_hours, fatigue_1to5: w.fatigue, condition_1to5: w.condition })),
   };
   const { json, tokens } = await generateJson({
     system: `너는 MyFit AI의 퍼스널 트레이너다. 한국어로 쓴다. 아래 제공된 수치만 사용하고, 없는 기록을 만들어 내지 않는다. 기록이 적거나 없으면 data_gaps에 적고 판단을 유보한다.${SAFETY_RULES}`,
@@ -266,5 +270,36 @@ export async function buildInsight(kind: "daily" | "weekly" | "monthly", periodS
   });
   const parsed = insightOut.safeParse(json);
   if (!parsed.success) throw new AIError("AI 리포트 형식이 올바르지 않습니다. 다시 시도해 주세요.", "invalid");
+  return { content: { ...parsed.data, facts_period: facts.period }, tokens };
+}
+
+// 식단 분석: 최근 7일 영양 합계(서버 계산) + 목표 + 운동·체중
+export async function buildNutritionInsight() {
+  const ctx = await loadContext();
+  const from = new Date(ctx.now.getTime() - 6 * 86400_000);
+  const fromKey = formatDate(from.toISOString(), "yyyy-MM-dd", ctx.tz);
+  const days = [...new Set(ctx.meals.map((m) => m.eaten_on))].filter((d) => d >= fromKey).sort();
+  const trained = new Set(ctx.sessions.map((s) => formatDate(s.started_at, "yyyy-MM-dd", ctx.tz)));
+  const daily = days.map((d) => {
+    const items = ctx.meals.filter((m) => m.eaten_on === d).flatMap((m) => m.meal_items);
+    return { date: d, ...sumMacros(items), trained: trained.has(d), includes_estimates: items.some((i) => i.is_estimate) };
+  });
+  const facts = {
+    period: `${fromKey} ~ ${ctx.today}`,
+    logged_days: daily.length,
+    daily,
+    goals: ctx.nutritionGoals,
+    training_goal: ctx.profile.training_goal ?? "미설정",
+    latest_body_weight_kg: ctx.latestWeight,
+    workouts_in_period: ctx.sessions.filter((s) => Date.parse(s.started_at) >= from.getTime()).length,
+  };
+  const { json, tokens } = await generateJson({
+    system: `너는 운동하는 사람을 위한 영양 코치다. 한국어로 쓴다. 제공된 수치만 사용하고, 기록이 없는 날은 판단하지 않는다. 추정치가 섞인 기록은 오차 가능성을 언급한다. 의학적 식이요법·질병 관련 조언은 하지 않고 필요하면 전문가 상담을 권한다. 극단적인 칼로리 제한을 권하지 않는다.`,
+    contents: [{ role: "user", parts: [{ text: `최근 7일 식단을 분석해 리포트를 작성하라.\n${JSON.stringify(facts)}` }] }],
+    schema: insightSchema,
+    maxOutputTokens: 2048,
+  });
+  const parsed = insightOut.safeParse(json);
+  if (!parsed.success) throw new AIError("AI 분석 형식이 올바르지 않습니다. 다시 시도해 주세요.", "invalid");
   return { content: { ...parsed.data, facts_period: facts.period }, tokens };
 }

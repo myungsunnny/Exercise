@@ -20,6 +20,16 @@ const AUTH_SHIM = `
   grant usage on schema public, auth to anon, authenticated;
   grant execute on function auth.uid() to anon, authenticated;
   grant references on auth.users to authenticated;
+  -- Supabase Storage 최소 구현
+  create schema storage;
+  create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
+  create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text, name text);
+  create function storage.foldername(name text) returns text[] language sql immutable as $$
+    select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
+  alter table storage.objects enable row level security;
+  grant usage on schema storage to authenticated;
+  grant select, insert, delete on storage.objects to authenticated;
+  grant execute on function storage.foldername(text) to authenticated;
 `;
 
 // 사용자로 전환해 쿼리 실행(트랜잭션 단위로 role/클레임 설정)
@@ -251,5 +261,35 @@ describe("phase 3", () => {
     await as(A, (tx) => tx.query(`insert into public.workout_feedback (session_id, user_id, fatigue, pain) values ($1, $2, 3, false)`, [s.id, A]));
     await expect(as(B, (tx) => tx.query(`insert into public.workout_feedback (session_id, user_id, fatigue) values ($1, $2, 3)`, [s.id, B]))).rejects.toThrow();
     expect(await count(B, "workout_feedback")).toBe(0);
+  });
+});
+
+describe("phase 4", () => {
+  it("body measurements, meals and wellness logs are private; one row per day", async () => {
+    await as(A, (tx) => tx.query(`insert into public.body_measurements (user_id, measured_on, weight_kg) values ($1, '2026-11-01', 75.2)`, [A]));
+    await expect(as(A, (tx) => tx.query(`insert into public.body_measurements (user_id, measured_on, weight_kg) values ($1, '2026-11-01', 75)`, [A]))).rejects.toThrow();
+    expect(await count(B, "body_measurements")).toBe(0);
+    const meal = await as(A, async (tx) => (await tx.query<{ id: string }>(`insert into public.meals (user_id, eaten_on, meal_type) values ($1, '2026-11-01', 'lunch') returning id`, [A])).rows[0].id);
+    await as(A, (tx) => tx.query(`insert into public.meal_items (meal_id, user_id, name, kcal) values ($1, $2, '쌀밥', 315)`, [meal, A]));
+    await expect(as(B, (tx) => tx.query(`insert into public.meal_items (meal_id, user_id, name, kcal) values ($1, $2, 'x', 1)`, [meal, B]))).rejects.toThrow();
+    expect(await count(B, "meal_items")).toBe(0);
+    await as(A, (tx) => tx.query(`insert into public.daily_wellness_logs (user_id, log_date, sleep_hours) values ($1, '2026-11-01', 7.5)`, [A]));
+    expect(await count(B, "daily_wellness_logs")).toBe(0);
+  });
+
+  it("seed foods are shared read-only estimates; user foods are private", async () => {
+    expect(await count(A, "food_items", "owner_id is null and is_estimate")).toBeGreaterThanOrEqual(40);
+    await expect(as(A, (tx) => tx.query(`insert into public.food_items (owner_id, name, serving_desc, kcal, source) values ($1, '가짜', '1', 1, 'seed')`, [A]))).rejects.toThrow();
+    await as(A, (tx) => tx.query(`insert into public.food_items (owner_id, name, serving_desc, kcal, source, is_estimate) values ($1, '엄마 반찬', '1접시', 200, 'user', true)`, [A]));
+    expect(await count(B, "food_items", "owner_id is not null")).toBe(0);
+    await as(B, (tx) => tx.query(`update public.food_items set kcal = 0 where owner_id is null`));
+    expect(await count(A, "food_items", "name = '쌀밥' and kcal = 315")).toBe(1);
+  });
+
+  it("photo storage paths are restricted to the user's own folder", async () => {
+    await as(A, (tx) => tx.query(`insert into storage.objects (bucket_id, name) values ('body-photos', $1)`, [`${A}/a.jpg`]));
+    await expect(as(A, (tx) => tx.query(`insert into storage.objects (bucket_id, name) values ('body-photos', $1)`, [`${B}/x.jpg`]))).rejects.toThrow();
+    expect(await as(B, async (tx) => (await tx.query(`select * from storage.objects`)).rows.length)).toBe(0);
+    await expect(as(A, (tx) => tx.query(`insert into public.body_photos (user_id, taken_on, storage_path) values ($1, '2026-11-01', $2)`, [A, `${B}/x.jpg`]))).rejects.toThrow();
   });
 });

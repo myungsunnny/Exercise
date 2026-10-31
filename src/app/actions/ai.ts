@@ -5,7 +5,7 @@ import { TZDate } from "@date-fns/tz";
 import { startOfMonth, startOfWeek } from "date-fns";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
-import { assertWithinLimit, buildInsight, chat, proposeRoutine, proposeWeeklyPlan, safetyNoticeFor, type RoutinePayload, type WeeklyPayload } from "@/lib/ai/coach";
+import { assertWithinLimit, buildInsight, buildNutritionInsight, chat, proposeRoutine, proposeWeeklyPlan, safetyNoticeFor, type RoutinePayload, type WeeklyPayload } from "@/lib/ai/coach";
 import { AIError, aiConfigured } from "@/lib/ai/gemini";
 import { getPreferences } from "@/lib/data";
 import { dateKey } from "@/lib/schedule";
@@ -198,6 +198,25 @@ export async function generateInsight(kind: "daily" | "weekly" | "monthly"): Pro
     if (error) throw error;
     revalidatePath("/coach");
     revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function generateNutritionInsight(): Promise<{ ok: true } | Fail> {
+  try {
+    ensureConfigured();
+    await assertWithinLimit();
+    const prefs = await getPreferences();
+    const { content, tokens } = await buildNutritionInsight();
+    const { supabase, userId } = await requireUser();
+    const { error } = await supabase.from("ai_insights").upsert(
+      { user_id: userId, kind: "nutrition", period_start: dateKey(new Date(), prefs.timezone), content, tokens, created_at: new Date().toISOString() },
+      { onConflict: "user_id,kind,period_start" },
+    );
+    if (error) throw error;
+    revalidatePath("/nutrition");
     return { ok: true };
   } catch (e) {
     return fail(e);

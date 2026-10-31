@@ -19,6 +19,8 @@ import { aiConfigured } from "@/lib/ai/gemini";
 import type { Insight } from "@/lib/ai/coach";
 import { requireUser } from "@/lib/auth";
 import { STATUS_LABEL } from "@/lib/progression";
+import { movingAverage, sumMacros, trendChange } from "@/lib/health";
+import { Moon, Ruler, Utensils } from "lucide-react";
 import { Bot } from "lucide-react";
 
 export const metadata = { title: "홈" };
@@ -44,6 +46,12 @@ export default async function DashboardPage() {
   const { supabase } = await requireUser();
   const { data: daily } = await supabase.from("ai_insights").select("content").eq("kind", "daily").eq("period_start", today).maybeSingle();
   const dailyInsight = daily?.content as Insight | undefined;
+  const weights = ctx.body.filter((b) => b.weight_kg != null).map((b) => ({ date: b.measured_on, value: b.weight_kg! }));
+  const weightAvg = movingAverage(weights).slice(-30);
+  const weight30 = trendChange(weights, 30);
+  const todayMacro = sumMacros(ctx.meals.filter((m) => m.eaten_on === today).flatMap((m) => m.meal_items));
+  const ng = ctx.nutritionGoals;
+  const todayWell = ctx.wellness.find((w) => w.log_date === today);
   const week = all.filter((s) => s.started_at >= start.toISOString() && s.started_at <= end.toISOString());
 
   const todays = expandPlan(routines, schedules, today, today).get(today) ?? [];
@@ -66,7 +74,7 @@ export default async function DashboardPage() {
   const { best, events } = personalRecords(all);
   const main = best.find((b) => b.values.best_1rm);
   const trend = main ? exerciseHistory(all, main.exerciseId).slice(-12).map((p) => ({ label: formatDate(p.date, "M/d", tz), best1RM: p.best1RM, maxWeight: p.maxWeight })) : [];
-  const goalCtx = { weekSessions: week.length, weekMinutes: Math.round(weekly.duration / 60), streak, best, bodyWeight: null };
+  const goalCtx = { weekSessions: week.length, weekMinutes: Math.round(weekly.duration / 60), streak, best, bodyWeight: ctx.latestWeight };
 
   const cards: DashCard[] = [
     {
@@ -261,6 +269,64 @@ export default async function DashboardPage() {
       ),
     },
     {
+      key: "body",
+      title: "체중 변화",
+      node: (
+        <Card className="h-full">
+          <CardHeader><CardTitle className="flex items-center gap-2"><Ruler className="size-4" /><Link href="/body" className="hover:text-primary">체중 변화</Link></CardTitle></CardHeader>
+          <CardContent>
+            {weights.length === 0 ? (
+              <p className="text-sm text-muted-foreground"><Link href="/body" className="text-primary hover:underline">신체 변화</Link>에서 체중을 기록하면 추세가 표시됩니다.</p>
+            ) : (
+              <>
+                <p className="num text-2xl font-semibold">{weights[weights.length - 1].value}kg <span className="text-xs font-normal text-muted-foreground">{weights[weights.length - 1].date.slice(5).replace("-", "/")} 측정</span></p>
+                <p className="text-xs text-muted-foreground">{weight30 ? `7일 평균 기준 30일 변화 ${weight30.diff > 0 ? "+" : ""}${weight30.diff}kg` : "추세를 보려면 2주 이상 기록이 필요합니다"}</p>
+                {weightAvg.length > 1 && <SimpleLineChart data={weightAvg.map((p) => ({ label: p.date.slice(5).replace("-", "/"), avg: p.value }))} x="label" unit="kg" height={140} label="체중 7일 평균" lines={[{ key: "avg", name: "7일 평균" }]} />}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      key: "nutrition",
+      title: "오늘의 영양",
+      node: (
+        <Card className="h-full">
+          <CardHeader><CardTitle className="flex items-center gap-2"><Utensils className="size-4" /><Link href="/nutrition" className="hover:text-primary">오늘의 영양</Link></CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {[["칼로리", todayMacro.kcal, ng.kcal, "kcal"], ["단백질", todayMacro.protein_g, ng.protein_g, "g"], ["수분", todayWell?.water_ml ?? 0, ng.water_ml, "ml"]].map(([l, v, g, u]) => (
+              <div key={l as string} className="space-y-1">
+                <div className="flex justify-between"><span>{l}</span><span className="num text-muted-foreground">{v as number}{g ? ` / ${g}` : ""}{u}</span></div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{ width: `${g ? Math.min(100, ((v as number) / (g as number)) * 100) : 0}%` }} /></div>
+              </div>
+            ))}
+            {todayMacro.kcal === 0 && <p className="text-xs text-muted-foreground">오늘 식단 기록이 없습니다.</p>}
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      key: "wellness",
+      title: "수면·컨디션",
+      node: (
+        <Card className="h-full">
+          <CardHeader><CardTitle className="flex items-center gap-2"><Moon className="size-4" /><Link href="/wellness" className="hover:text-primary">수면·컨디션</Link></CardTitle></CardHeader>
+          <CardContent className="text-sm">
+            {todayWell && (todayWell.sleep_hours != null || todayWell.condition != null) ? (
+              <dl className="grid grid-cols-2 gap-2">
+                {[["수면", todayWell.sleep_hours != null ? `${todayWell.sleep_hours}시간` : "-"], ["수면의 질", todayWell.sleep_quality ? `${todayWell.sleep_quality}/5` : "-"], ["컨디션", todayWell.condition ? `${todayWell.condition}/5` : "-"], ["피로도", todayWell.fatigue ? `${todayWell.fatigue}/5` : "-"]].map(([k, v]) => (
+                  <div key={k} className="rounded-lg bg-muted p-2"><dt className="text-xs text-muted-foreground">{k}</dt><dd className="num font-semibold">{v}</dd></div>
+                ))}
+              </dl>
+            ) : (
+              <p className="text-muted-foreground">오늘 수면·컨디션을 아직 기록하지 않았습니다. <Link href="/wellness" className="text-primary hover:underline">기록하기</Link></p>
+            )}
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
       key: "recent",
       title: "최근 운동",
       wide: true,
@@ -316,7 +382,6 @@ export default async function DashboardPage() {
         )}
       </div>
       <DashboardGrid cards={cards} saved={prefs.dashboard_order} />
-      <p className="text-xs text-muted-foreground">체중 변화 카드는 Phase 4(신체 변화 관리)에서 추가됩니다.</p>
     </div>
   );
 }

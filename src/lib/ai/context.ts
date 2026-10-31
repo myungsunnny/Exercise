@@ -1,6 +1,6 @@
 import "server-only";
 import { addDays } from "date-fns";
-import { getCoachProfile, getExercises, getGoals, getPreferences, getRoutines, getSchedules, getUserExerciseSettings, listCompletedSessions, type Routine } from "@/lib/data";
+import { getBodyMeasurements, getCoachProfile, getExercises, getGoals, getMeals, getNutritionGoals, getPreferences, getRoutines, getSchedules, getUserExerciseSettings, getWellness, listCompletedSessions, type Routine } from "@/lib/data";
 import { dateKey, expandPlan } from "@/lib/schedule";
 import { recommendNext } from "@/lib/progression";
 
@@ -13,9 +13,14 @@ export async function loadContext() {
   const tz = prefs.timezone;
   const today = dateKey(now, tz);
   const weekAhead = dateKey(addDays(now, 7), tz);
-  const schedules = await getSchedules(today, weekAhead);
+  const back = (days: number) => dateKey(addDays(now, -days), tz);
+  const [schedules, body, wellness, meals, nutritionGoals] = await Promise.all([
+    getSchedules(today, weekAhead), getBodyMeasurements(back(180)), getWellness(back(30), today), getMeals(back(13), today), getNutritionGoals(),
+  ]);
   const plan = expandPlan(routines, schedules, today, weekAhead);
-  return { now, tz, today, prefs, profile, sessions, routines, goals, exercises, settings, plan };
+  const weights = body.filter((b) => b.weight_kg != null);
+  const latestWeight = weights.length ? weights[weights.length - 1].weight_kg : null;
+  return { now, tz, today, prefs, profile, sessions, routines, goals, exercises, settings, plan, body, wellness, meals, nutritionGoals, latestWeight };
 }
 export type Ctx = Awaited<ReturnType<typeof loadContext>>;
 

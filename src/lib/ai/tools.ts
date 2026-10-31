@@ -8,6 +8,7 @@ import { formatDate, weekStreak } from "@/lib/format";
 import { goalProgress, GOAL_KIND_LABEL, GOAL_UNIT } from "@/lib/goals";
 import { recommendNext, STATUS_LABEL } from "@/lib/progression";
 import { DEFAULT_MUSCLE_SET_TARGET, EQUIPMENT_LABEL } from "@/lib/types";
+import { movingAverage, sumMacros, trendChange } from "@/lib/health";
 import { findExercise, incrementFor, recommendedRoutine, routineTargets, type Ctx } from "./context";
 import type { FunctionDecl } from "./gemini";
 
@@ -36,6 +37,9 @@ export const TOOL_DECLS: FunctionDecl[] = [
     description: "특정 운동과 주요 근육이 같은 대체 운동 목록을 조회한다. 사용자가 보유한 기구가 설정돼 있으면 그 기구로 할 수 있는 운동을 우선한다.",
     parameters: { type: "OBJECT", properties: { exercise: { type: "STRING", description: "교체하려는 운동 이름" } }, required: ["exercise"] },
   },
+  { name: "get_body_trend", description: "체중·체지방률·골격근량·둘레 측정 기록(최근 180일)과 7일 평균 기준 추세를 조회한다." },
+  { name: "get_nutrition_summary", description: "최근 14일 일별 칼로리·단백질·탄수화물·지방 섭취 합계, 영양 목표, 운동한 날 여부를 조회한다." },
+  { name: "get_wellness_summary", description: "최근 30일 수면 시간·수면의 질·피로도·컨디션·안정시 심박수·걸음 수 기록을 조회한다." },
   { name: "get_recent_feedback", description: "최근 운동 후 사용자가 입력한 피로도(1~5)·에너지(1~5)·통증 여부·메모를 조회한다." },
 ];
 
@@ -69,7 +73,7 @@ export async function runTool(ctx: Ctx, name: string, args: Record<string, unkno
       const week = ctx.sessions.filter((s) => inRange(s.started_at, weekStart));
       const { best } = personalRecords(ctx.sessions);
       const streak = weekStreak(ctx.sessions.map((s) => s.started_at), ctx.now, ctx.tz);
-      const gctx = { weekSessions: week.length, weekMinutes: Math.round(week.reduce((a, s) => a + durationSec(s), 0) / 60), streak, best, bodyWeight: null };
+      const gctx = { weekSessions: week.length, weekMinutes: Math.round(week.reduce((a, s) => a + durationSec(s), 0) / 60), streak, best, bodyWeight: ctx.latestWeight };
       const days = ["일", "월", "화", "수", "목", "금", "토"];
       return {
         summary: "사용자 프로필·목표·루틴·일정",
@@ -81,6 +85,7 @@ export async function runTool(ctx: Ctx, name: string, args: Record<string, unkno
             equipment: p.equipment.length ? p.equipment.map((e) => EQUIPMENT_LABEL[e as keyof typeof EQUIPMENT_LABEL] ?? e) : "미설정(모든 기구 가능으로 간주하지 말고 확인 필요)",
             constraints_and_preferences: p.constraints_note ?? "없음",
           },
+          latest_body_weight_kg: ctx.latestWeight,
           preferences: { weekly_workout_target: ctx.prefs.weekly_workout_target, default_rest_seconds: ctx.prefs.default_rest_seconds, weight_increment_kg: ctx.prefs.weight_increment_kg },
           total_completed_sessions: ctx.sessions.length,
           first_session: ctx.sessions.length ? day(ctx, ctx.sessions[ctx.sessions.length - 1].started_at) : null,
@@ -196,6 +201,33 @@ export async function runTool(ctx: Ctx, name: string, args: Record<string, unkno
         .sort((a, b) => Number(b.available_with_my_equipment) - Number(a.available_with_my_equipment))
         .slice(0, 12);
       return { summary: `대체 운동: ${ex.name_ko} ${alts.length}개`, result: { exercise: ex.name_ko, primary_muscles: [...prim].map((m) => MUSCLE_NAME[m]), equipment_profile_set: owned.size > 0, alternatives: alts } };
+    }
+    case "get_body_trend": {
+      if (!ctx.body.length) return { summary: "신체 기록: 없음", result: { data_available: false, message: "신체 측정 기록이 없습니다." } };
+      const keys = { weight_kg: "체중(kg)", body_fat_pct: "체지방률(%)", skeletal_muscle_kg: "골격근량(kg)", waist_cm: "허리둘레(cm)" } as const;
+      const trends = Object.fromEntries(Object.entries(keys).map(([k, label]) => {
+        const pts = ctx.body.filter((b) => b[k as keyof typeof keys] != null).map((b) => ({ date: b.measured_on, value: b[k as keyof typeof keys] as number }));
+        return [label, pts.length ? { latest: pts[pts.length - 1], measurements: pts.length, change_30d_7day_avg: trendChange(pts, 30), change_90d_7day_avg: trendChange(pts, 90) } : null];
+      }));
+      const w = ctx.body.filter((b) => b.weight_kg != null).map((b) => ({ date: b.measured_on, value: b.weight_kg! }));
+      return {
+        summary: `신체 기록 ${ctx.body.length}건`,
+        result: { data_available: true, trends, weight_7day_avg_series: movingAverage(w).slice(-30), note: "체성분은 하루 단위 오차가 커서 7일 평균 비교값을 우선한다. 측정 기기·시간에 따라 차이가 있다." },
+      };
+    }
+    case "get_nutrition_summary": {
+      const days = [...new Set(ctx.meals.map((m) => m.eaten_on))].sort();
+      if (!days.length) return { summary: "영양 기록: 없음", result: { data_available: false, message: "최근 14일 식단 기록이 없습니다.", goals: ctx.nutritionGoals } };
+      const trained = new Set(ctx.sessions.map((s) => day(ctx, s.started_at)));
+      const daily = days.map((d) => { const items = ctx.meals.filter((m) => m.eaten_on === d).flatMap((m) => m.meal_items); return { date: d, ...sumMacros(items), items: items.length, trained: trained.has(d), includes_estimates: items.some((i) => i.is_estimate) }; });
+      return { summary: `영양 기록 ${days.length}일`, result: { data_available: true, goals: ctx.nutritionGoals, latest_body_weight_kg: ctx.latestWeight, daily, note: "기록하지 않은 날은 포함하지 않음. 추정치가 섞여 있으면 오차가 있다." } };
+    }
+    case "get_wellness_summary": {
+      if (!ctx.wellness.length) return { summary: "수면·건강 기록: 없음", result: { data_available: false, message: "최근 30일 수면·건강 기록이 없습니다." } };
+      return {
+        summary: `수면·건강 기록 ${ctx.wellness.length}일`,
+        result: { data_available: true, logs: ctx.wellness.map((w) => ({ date: w.log_date, sleep_hours: w.sleep_hours, sleep_quality_1to5: w.sleep_quality, fatigue_1to5: w.fatigue, condition_1to5: w.condition, resting_hr: w.resting_hr, steps: w.steps, active_minutes: w.active_minutes })), note: "수동 입력값이며 의학적 측정이 아니다." },
+      };
     }
     case "get_recent_feedback": {
       const fb = await getRecentFeedback(10);
